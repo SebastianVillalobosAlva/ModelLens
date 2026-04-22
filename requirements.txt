@@ -1,0 +1,10 @@
+# Core
+torch>=2.0.0
+transformers>=4.30.0
+
+# Visualization
+matplotlib>=3.7.0
+plotly>=5.15.0
+
+# Web interface
+gradio>=4.0.0
