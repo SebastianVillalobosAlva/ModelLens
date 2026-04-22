@@ -122,7 +122,7 @@ modellens/
 │   ├── analysis/       # Interpretability analysis modules
 │   ├── visualization/  # Plotting and visualization utilities
 │   └── utils/          # Shared helper functions
-├── app/                # Gradio web interface
+├── app/                # Streamlit web interface
 ├── tests/              # Unit tests
 └── examples/           # Demo notebooks
 ```
