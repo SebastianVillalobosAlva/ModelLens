@@ -38,8 +38,32 @@ class ModelLens:
         return PyTorchAdapter(model)
 
     def _is_huggingface(self, model: torch.nn.Module) -> bool:
-        """Check if model is a HuggingFace PreTrainedModel."""
-        return hasattr(model, "config") and hasattr(model, "generate")
+        """
+        Check if model is a HuggingFace PreTrainedModel.
+
+        Primary: check class inheritance (works for all HF models
+        including BERT, GPT-2, LLaMA, etc.)
+
+        Fallback: check for PretrainedConfig attribute in case the
+        model is wrapped or transformers import structure changes.
+        """
+        # Primary: direct inheritance check
+        try:
+            from transformers import PreTrainedModel
+
+            if isinstance(model, PreTrainedModel):
+                return True
+        except ImportError:
+            # transformers not installed — fall through to heuristic
+            pass
+
+        # Fallback: check for HF-specific config object
+        # PretrainedConfig has model_type, which random config attrs won't
+        if hasattr(model, "config"):
+            config = model.config
+            return hasattr(config, "model_type") and hasattr(config, "hidden_size")
+
+        return False
 
     # ---- Hook Convenience Methods ----
     def attach_layers(self, layer_names: List[str]) -> "ModelLens":
