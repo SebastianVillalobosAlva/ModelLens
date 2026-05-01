@@ -1,15 +1,3 @@
-"""
-modellens/core/lens.py — Redesigned for architecture-agnostic analysis
-
-Changes from original:
-1. Auto-detection handles transformers, CNNs, RNNs, MLPs
-2. All analysis methods gated by adapter.require()
-3. summary() shows available/unavailable analyses
-4. Removed model param from adapter calls — adapters use self.model
-5. New analysis methods: filter_analysis(), feature_maps(), gate_analysis()
-6. logit_lens() renamed to layer_probe() (old name kept for compat)
-"""
-
 import torch
 from typing import Dict, List, Optional, Type, Callable
 from modellens.core.hooks import HookManager
