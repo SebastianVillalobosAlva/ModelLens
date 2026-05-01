@@ -1,5 +1,20 @@
 import torch
 from typing import Dict, List, Optional, Callable
+from contextlib import contextmanager
+
+
+@contextmanager
+def _hook_context():
+    """
+    Context manager that collects hook handles and guarantees
+    they are removed on exit — even if an exception is raised.
+    """
+    hooks = []
+    try:
+        yield hooks
+    finally:
+        for h in hooks:
+            h.remove()
 
 
 def run_activation_patching(
@@ -48,21 +63,18 @@ def run_activation_patching(
     if layer_names is None:
         layer_names = _get_sublayers(model)
 
-    # Clear any leftover hooks
-    _clear_all_hooks(model)
-
     # Step 1: Get clean metric
     with torch.no_grad():
         clean_output = _forward(model, clean_input, **kwargs)
     clean_metric = metric_fn(clean_output)
 
-    # Step 2: Capture corrupted activations
+    # Step 2: Capture corrupted activations (hooks scoped and cleaned up)
     corrupted_activations, corrupted_output = _capture_activations(
         model, available, corrupted_input, layer_names, **kwargs
     )
     corrupted_metric = metric_fn(corrupted_output)
 
-    # Step 3: Patch one sublayer at a time
+    # Step 3: Patch one sublayer at a time (each patch cleans up its hook)
     patch_effects = {}
     for target_layer in layer_names:
         patched_output = _run_with_patch(
@@ -94,27 +106,29 @@ def run_activation_patching(
 def _capture_activations(model, available, inputs, layer_names, **kwargs):
     """Capture activations at specified layers during a forward pass."""
     activations = {}
-    hooks = []
-    for name in layer_names:
 
-        def make_hook(n):
-            def hook_fn(module, input, output):
-                if isinstance(output, tuple):
-                    activations[n] = tuple(
-                        o.detach().clone() if o is not None else None for o in output
-                    )
-                else:
-                    activations[n] = output.detach().clone()
+    with _hook_context() as hooks:
+        for name in layer_names:
 
-            return hook_fn
+            def make_hook(n):
+                def hook_fn(module, input, output):
+                    if isinstance(output, tuple):
+                        activations[n] = tuple(
+                            o.detach().clone() if o is not None else None
+                            for o in output
+                        )
+                    else:
+                        activations[n] = output.detach().clone()
 
-        hooks.append(available[name].register_forward_hook(make_hook(name)))
+                return hook_fn
 
-    with torch.no_grad():
-        output = _forward(model, inputs, **kwargs)
+            hook = available[name].register_forward_hook(make_hook(name))
+            hooks.append(hook)
 
-    for h in hooks:
-        h.remove()
+        with torch.no_grad():
+            output = _forward(model, inputs, **kwargs)
+
+    # Hooks are automatically removed here by _hook_context
 
     return activations, output
 
@@ -122,13 +136,18 @@ def _capture_activations(model, available, inputs, layer_names, **kwargs):
 def _run_with_patch(model, available, inputs, target_layer, patch_activation, **kwargs):
     """Run the model with a single layer's activation replaced."""
 
-    def patch_hook(module, input, output, pa=patch_activation):
-        return pa
+    with _hook_context() as hooks:
 
-    hook = available[target_layer].register_forward_hook(patch_hook)
-    with torch.no_grad():
-        output = _forward(model, inputs, **kwargs)
-    hook.remove()
+        def patch_hook(module, input, output, pa=patch_activation):
+            return pa
+
+        hook = available[target_layer].register_forward_hook(patch_hook)
+        hooks.append(hook)
+
+        with torch.no_grad():
+            output = _forward(model, inputs, **kwargs)
+
+    # Hook is automatically removed here by _hook_context
 
     return output
 
@@ -155,18 +174,11 @@ def _get_sublayers(model) -> List[str]:
     """Auto-detect attn and mlp sublayers for patching."""
     sublayers = []
     for name, _ in model.named_modules():
-        # Match common sublayer patterns
         if name.endswith(".attn") or name.endswith(".mlp"):
             sublayers.append(name)
         elif name.endswith(".self_attn") or name.endswith(".self_attention"):
             sublayers.append(name)
     return sublayers
-
-
-def _clear_all_hooks(model) -> None:
-    """Remove all forward hooks from the model."""
-    for _, module in model.named_modules():
-        module._forward_hooks.clear()
 
 
 def _default_metric(output) -> float:
