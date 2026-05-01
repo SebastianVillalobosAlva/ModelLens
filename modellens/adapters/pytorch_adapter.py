@@ -273,25 +273,30 @@ class PyTorchAdapter(BaseAdapter):
         Find the output projection layer by name convention,
         falling back to the last Linear layer in the model.
         """
-        common_names = [
-            "unembed",
-            "lm_head",
-            "output_proj",
-            "decoder",
-            "fc_out",
+        # Priority names — check most specific first
+        priority_names = [
+            "output",
             "classifier",
             "head",
-            "output",
-            "fc",
+            "lm_head",
+            "fc_out",
+            "unembed",
         ]
+        general_names = ["fc", "linear", "decoder", "output_proj"]
 
-        # Try name-based detection first
+        # Try priority names first (exact-ish match)
         for name, module in self.model.named_modules():
             if isinstance(module, nn.Linear):
-                if any(cn in name.lower() for cn in common_names):
+                if any(cn == name.lower() for cn in priority_names):
                     return module
 
-        # Fallback: last Linear layer
+        # Try priority names as substrings
+        for name, module in self.model.named_modules():
+            if isinstance(module, nn.Linear):
+                if any(cn in name.lower() for cn in priority_names):
+                    return module
+
+        # Fallback: last Linear layer in the model
         last_linear = None
         for _, module in self.model.named_modules():
             if isinstance(module, nn.Linear):

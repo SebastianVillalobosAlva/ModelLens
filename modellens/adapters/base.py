@@ -35,11 +35,11 @@ class UnsupportedAnalysisError(Exception):
     """Raised when an analysis is not supported by the current adapter."""
 
     def __init__(
-        self, analysis: str, adapter_type: str, available: Set[AnalysisCapability]
+        self, analysis: str, architecture: str, available: Set[AnalysisCapability]
     ):
         available_str = ", ".join(c.value for c in available)
         super().__init__(
-            f"'{analysis}' is not supported for {adapter_type} models. "
+            f"'{analysis}' is not supported for {architecture} models. "
             f"Available analyses: [{available_str}]"
         )
 
@@ -105,7 +105,7 @@ class BaseAdapter(ABC):
         """
         if not self.supports(capability):
             raise UnsupportedAnalysisError(
-                analysis_name, self.type_of_adapter, self.capabilities()
+                analysis_name, self.architecture_family, self.capabilities()
             )
 
     # ---- Universal Methods (all adapters must implement) ----
