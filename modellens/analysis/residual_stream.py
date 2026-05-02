@@ -9,43 +9,50 @@ def run_residual_analysis(
     """
     Analyze how information flows through the residual stream.
 
-    In transformers, each layer adds to a running "residual stream."
-    This analysis measures how much each layer contributes to the
-    final representation by comparing activations before and after each layer.
+    In architectures with skip connections (transformers, ResNets),
+    each layer adds to a running "residual stream." This analysis
+    measures how much each layer contributes to the final
+    representation.
 
     Args:
         lens: ModelLens instance
         inputs: Model input
-        layer_names: Layers to analyze. If None, uses all hooked layers.
+        layer_names: Layers to analyze. If None, uses sequential layers
+                     from the adapter in correct execution order.
 
     Returns:
         Dict with per-layer contribution metrics
     """
-    # Attach hooks and run
-    if layer_names:
-        lens.attach_layers(layer_names)
-    elif len(lens.hooks) == 0:
-        lens.attach_all()
+    # Use adapter's sequential layers for correct execution order
+    if layer_names is None:
+        layer_names = lens.adapter.get_sequential_layers()
 
+    if len(layer_names) < 2:
+        raise ValueError("Need at least 2 layers to analyze residual stream.")
+
+    # Attach hooks and run
+    lens.attach_layers(layer_names)
     output = lens.run(inputs, **kwargs)
     activations = lens.get_activations()
 
-    # Filter to requested layers
-    if layer_names:
-        activations = {k: v for k, v in activations.items() if k in layer_names}
-
-    # Get ordered list of layer activations
-    layer_list = list(activations.items())
+    # Build ordered list from our layer_names, preserving execution order
+    layer_list = []
+    for name in layer_names:
+        if name in activations:
+            layer_list.append((name, activations[name]))
 
     if len(layer_list) < 2:
-        raise ValueError("Need at least 2 layers to analyze residual stream.")
+        raise ValueError(
+            f"Only captured {len(layer_list)} layer activations. "
+            f"Need at least 2 for residual analysis."
+        )
 
     contributions = {}
     for i in range(1, len(layer_list)):
         prev_name, prev_act = layer_list[i - 1]
         curr_name, curr_act = layer_list[i]
 
-        # Only compare if shapes match (same dimension = same residual stream)
+        # Only compare if shapes match (same residual stream dimension)
         if prev_act.shape != curr_act.shape:
             continue
 
@@ -58,7 +65,7 @@ def run_residual_analysis(
         # Magnitude of the running stream
         stream_norm = torch.norm(curr_act, dim=-1).mean().item()
 
-        # Cosine similarity between consecutive layers (how much direction changed)
+        # Cosine similarity between consecutive layers
         cos_sim = (
             F.cosine_similarity(
                 prev_act.reshape(-1, prev_act.shape[-1]),
@@ -121,7 +128,7 @@ def identify_critical_layers(
     """
     Identify layers with the highest relative contribution to the
     residual stream. These are the layers that change the representation
-    the most and are likely the most important for the model's behavior.
+    the most and are likely most important for the model's behavior.
 
     Args:
         residual_results: Output from run_residual_analysis
@@ -138,7 +145,6 @@ def identify_critical_layers(
         if data["relative_contribution"] >= threshold
     ]
 
-    # Sort by contribution, highest first
     critical.sort(key=lambda x: x[1], reverse=True)
 
     return [name for name, _ in critical]
