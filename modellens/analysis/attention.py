@@ -36,12 +36,31 @@ def _extract_hf_attention(lens, inputs, layer_names, **kwargs) -> Dict:
     # Tokenize if needed
     if isinstance(inputs, str):
         tokens = lens.adapter.tokenize(inputs)
+    elif hasattr(inputs, "input_ids") or isinstance(inputs, dict):
+        tokens = inputs
     else:
-        tokens = inputs if isinstance(inputs, dict) else {"input_ids": inputs}
+        tokens = {"input_ids": inputs}
 
-    # Run with attention output enabled
+    # Enable attention output in model config
+    original_setting = getattr(lens.model.config, "output_attentions", False)
+    lens.model.config.output_attentions = True
+
+    # Run forward pass
     with torch.no_grad():
-        output = lens.model(**tokens, output_attentions=True, **kwargs)
+        output = lens.model(**tokens, **kwargs)
+
+    # Restore original setting
+    lens.model.config.output_attentions = original_setting
+
+    attentions = output.attentions
+
+    if not attentions:
+        raise ValueError(
+            "Model returned no attention weights. "
+            "This usually means the model is using SDPA or Flash Attention. "
+            "Reload the model with: "
+            'AutoModelForCausalLM.from_pretrained("model_name", attn_implementation="eager")'
+        )
 
     attentions = output.attentions  # Tuple of (batch, heads, seq, seq) per layer
     results = {}
