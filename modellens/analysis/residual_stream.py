@@ -27,6 +27,8 @@ def run_residual_analysis(
     if layer_names is None:
         layer_names = lens.adapter.get_sequential_layers()
 
+    assert layer_names
+
     if len(layer_names) < 2:
         raise ValueError("Need at least 2 layers to analyze residual stream.")
 
