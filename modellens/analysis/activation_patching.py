@@ -50,7 +50,7 @@ def run_activation_patching(
     model = lens.model
     available = dict(model.named_modules())
 
-    # Input length validation
+    # Input length validation (sequence models only)
     clean_len = _get_seq_length(clean_input)
     corrupted_len = _get_seq_length(corrupted_input)
     if clean_len and corrupted_len and clean_len != corrupted_len:
@@ -61,7 +61,7 @@ def run_activation_patching(
 
     # Auto-detect sublayers if not specified
     if layer_names is None:
-        layer_names = _get_sublayers(model)
+        layer_names = lens.adapter.get_patchable_layers()
 
     # Step 1: Get clean metric
     with torch.no_grad():
