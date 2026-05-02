@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 
 def run_embeddings_analysis(lens, inputs, **kwargs) -> Dict:
@@ -9,7 +9,7 @@ def run_embeddings_analysis(lens, inputs, **kwargs) -> Dict:
 
     Args:
         lens: ModelLens instance
-        inputs: Model input (string or tensor)
+        inputs: Model input (string, tensor, or dict)
 
     Returns:
         Dict with embedding vectors, norms, and similarity data
@@ -35,30 +35,40 @@ def run_embeddings_analysis(lens, inputs, **kwargs) -> Dict:
 
 
 def _get_input_embeddings(lens, inputs, **kwargs) -> Optional[torch.Tensor]:
-    """Extract input embeddings from the model."""
-    model = lens.model
+    """Extract input embeddings using the adapter's embedding layer."""
+    # Try adapter's get_embedding_layer() first
+    embed_layer = lens.adapter.get_embedding_layer()
 
-    # HuggingFace: use get_input_embeddings()
-    if hasattr(model, "get_input_embeddings"):
-        embed_layer = model.get_input_embeddings()
-        if isinstance(inputs, str):
-            tokens = lens.adapter.tokenize(inputs)
-            input_ids = tokens["input_ids"]
-        elif isinstance(inputs, dict) or hasattr(inputs, "input_ids"):
-            input_ids = inputs["input_ids"]
-        else:
-            input_ids = inputs
+    if embed_layer is not None:
+        # Resolve input_ids from different input formats
+        input_ids = _resolve_input_ids(lens, inputs)
+        if input_ids is not None:
+            with torch.no_grad():
+                return embed_layer(input_ids)
 
-        with torch.no_grad():
-            return embed_layer(input_ids)
+    return None
 
-    # Vanilla PyTorch: try to find an embedding layer via hooks
-    embed_names = ["embed", "embedding", "token_embed", "wte"]
-    for name, module in model.named_modules():
-        if any(en in name.lower() for en in embed_names):
-            if isinstance(module, torch.nn.Embedding):
-                with torch.no_grad():
-                    return module(inputs)
+
+def _resolve_input_ids(lens, inputs) -> Optional[torch.Tensor]:
+    """
+    Extract input_ids from various input formats.
+    Handles strings, dicts, and raw tensors.
+    """
+    if isinstance(inputs, str):
+        tokens = lens.adapter.tokenize(inputs)
+        return tokens["input_ids"]
+
+    if isinstance(inputs, dict):
+        if "input_ids" in inputs:
+            return inputs["input_ids"]
+        if "input" in inputs:
+            return inputs["input"]
+
+    if hasattr(inputs, "input_ids"):
+        return inputs["input_ids"]
+
+    if isinstance(inputs, torch.Tensor):
+        return inputs
 
     return None
 
@@ -80,7 +90,6 @@ def _cosine_similarity_matrix(embeddings: torch.Tensor) -> torch.Tensor:
 def nearest_neighbors(lens, token_embedding: torch.Tensor, top_k: int = 10) -> Dict:
     """
     Find the nearest tokens in embedding space to a given embedding vector.
-    Useful for understanding what a particular embedding "means".
 
     Args:
         lens: ModelLens instance
@@ -90,12 +99,11 @@ def nearest_neighbors(lens, token_embedding: torch.Tensor, top_k: int = 10) -> D
     Returns:
         Dict with nearest token indices and their similarity scores
     """
-    # Get the full embedding matrix
-    model = lens.model
-    if hasattr(model, "get_input_embeddings"):
-        embed_matrix = model.get_input_embeddings().weight.detach()
-    else:
-        raise ValueError("Could not find embedding matrix.")
+    embed_layer = lens.adapter.get_embedding_layer()
+    if embed_layer is None:
+        raise ValueError("Could not find embedding layer.")
+
+    embed_matrix = embed_layer.weight.detach()
 
     # Compute cosine similarity against all tokens
     similarity = F.cosine_similarity(token_embedding.unsqueeze(0), embed_matrix, dim=-1)
