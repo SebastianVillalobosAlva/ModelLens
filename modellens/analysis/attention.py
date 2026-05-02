@@ -18,7 +18,7 @@ def run_attention_analysis(
     """
     # Find attention layers if not specified
     if layer_names is None:
-        layer_names = lens.adapter.get_attention_layers(lens.model)
+        layer_names = lens.adapter.get_attention_layers()
 
     if not layer_names:
         raise ValueError("No attention layers found in the model.")
@@ -66,7 +66,6 @@ def _extract_hook_attention(lens, inputs, layer_names, **kwargs) -> Dict:
 
     def make_attn_hook(name):
         def hook_fn(module, input, output):
-            # Attention modules typically return (output, weights) or just weights
             if isinstance(output, tuple) and len(output) > 1:
                 attention_weights[name] = output[1].detach()
             else:
@@ -112,13 +111,11 @@ def head_summary(attention_results: Dict) -> Dict:
         weights = data["weights"]
 
         if weights.dim() == 4:
-            # HuggingFace: (batch, heads, seq, seq)
             entropy = (
                 -(weights * torch.log(weights + 1e-10)).sum(dim=-1).mean(dim=(0, 2))
             )
             max_attn = weights.max(dim=-1).values.mean(dim=(0, 2))
         else:
-            # Vanilla PyTorch: (batch, seq, seq) — no head dimension
             entropy = -(weights * torch.log(weights + 1e-10)).sum(dim=-1).mean(dim=0)
             max_attn = weights.max(dim=-1).values.mean(dim=0)
 
