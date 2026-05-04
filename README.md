@@ -1,128 +1,233 @@
 # ModelLens
 
-An open-source interpretability toolkit for PyTorch neural networks. ModelLens provides a unified interface for analyzing model internals across different architectures, sitting between architecture-specific tools like TransformerLens and general-purpose libraries like Captum.
+**Architecture-agnostic neural network interpretability toolkit.**
 
-## Features
+Point ModelLens at any PyTorch model — transformer, CNN, LSTM, GRU, or MLP — and get the right interpretability analyses for that architecture automatically.
 
-- **Activation Hooks** — Capture intermediate activations from any layer using PyTorch forward hooks
-- **Logit Lens** — Project hidden states through the unembedding matrix to observe how predictions evolve across layers
-- **Attention Analysis** — Extract and analyze attention weight maps across heads and layers
-- **Activation Patching** — Causal intervention analysis to identify which components drive specific behaviors
-- **Embeddings Inspection** — Analyze input embedding representations and token similarity
-- **Residual Stream Analysis** — Trace information flow through skip connections and measure per-layer contributions
+Unlike tools like [TransformerLens](https://github.com/TransformerLensOrg/TransformerLens) that focus exclusively on transformers, ModelLens is designed for researchers and engineers who need interpretability across architecture families.
 
-## Supported Backends
+## Quickstart
 
-- **HuggingFace** — Any `PreTrainedModel` (GPT-2, BERT, LLaMA, etc.)
-- **PyTorch** — Vanilla `nn.Module` models
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from modellens import ModelLens
+
+model = AutoModelForCausalLM.from_pretrained("gpt2", attn_implementation="eager")
+tokenizer = AutoTokenizer.from_pretrained("gpt2")
+
+lens = ModelLens(model)
+lens.adapter.set_tokenizer(tokenizer)
+
+print(lens)
+# ModelLens(
+#   backend=huggingface,
+#   architecture=transformer,
+#   params=124,439,808,
+#   analyses=['activation_patching', 'attention_maps', 'embeddings',
+#             'hooks', 'layer_probing', 'residual_stream']
+# )
+
+inputs = tokenizer("The capital of France is", return_tensors="pt")
+results = lens.layer_probe(inputs, top_k=5)
+```
 
 ## Installation
 
 ```bash
-git clone https://github.com/your-username/modellens.git
-cd modellens
+git clone https://github.com/SebastianVillalobosAlva/ModelLens.git
+cd ModelLens
 pip install -e .
 ```
 
-For visualization and development dependencies:
+## How It Works
 
-```bash
-pip install -e ".[viz,dev]"
-```
-
-## Quick Start
+ModelLens uses an **adapter pattern** to support different architectures. When you pass a model, it auto-detects the architecture family and declares which analyses are available:
 
 ```python
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
-from modellens import ModelLens
+# Transformer
+lens = ModelLens(gpt2_model)
+lens.available_analyses()
+# ['activation_patching', 'attention_maps', 'embeddings',
+#  'hooks', 'layer_probing', 'residual_stream']
 
-# Load a model
-model = GPT2LMHeadModel.from_pretrained("gpt2-medium", attn_implementation="eager")
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2-medium")
+# CNN
+lens = ModelLens(resnet)
+lens.available_analyses()
+# ['activation_patching', 'feature_map_analysis', 'filter_analysis',
+#  'hooks', 'layer_probing']
 
-# Wrap it with ModelLens
-lens = ModelLens(model)
-lens.adapter.set_tokenizer(tokenizer)
+# LSTM
+lens = ModelLens(lstm_model)
+lens.available_analyses()
+# ['activation_patching', 'embeddings', 'gate_analysis',
+#  'hooks', 'layer_probing']
 
-# Run logit lens analysis
-tokens = tokenizer("The capital of France is", return_tensors="pt")
-lens.attach_all()
-results = lens.logit_lens(tokens, top_k=5)
+# MLP
+lens = ModelLens(feedforward_net)
+lens.available_analyses()
+# ['activation_patching', 'hooks', 'layer_probing']
 ```
 
-## Analysis Modules
+Calling an unsupported analysis gives a clear error:
+```python
+lens = ModelLens(my_cnn)
+lens.attention_map(inputs)
+# UnsupportedAnalysisError: 'attention_map' is not supported for
+# convolutional models. Available analyses: [filter_analysis, ...]
+```
 
-### Logit Lens
+## Analyses
 
-See what the model would predict at each intermediate layer:
+### Layer Probing (Generalized Logit Lens)
+
+Project intermediate layer representations through the output projection to see what the model would predict at each layer. Works on any architecture with a hidden → output mapping.
 
 ```python
-from modellens.analysis.logit_lens import run_logit_lens, decode_logit_lens
+results = lens.layer_probe(inputs, top_k=5)
 
-results = run_logit_lens(lens, tokens, top_k=5)
+from modellens.analysis.logit_lens import decode_logit_lens
 decoded = decode_logit_lens(results, tokenizer=tokenizer)
-
-for layer, predictions in decoded.items():
-    print(f"{layer} -> {predictions[0]}")
+for layer, preds in decoded.items():
+    print(f"{layer}: {preds[:3]}")
 ```
 
-### Attention Analysis
+### Attention Maps (Transformers)
 
-Extract attention maps and identify focused vs diffuse heads:
+Extract attention weight maps from transformer layers.
 
 ```python
-from modellens.analysis.attention import run_attention_analysis, head_summary
-
-attn_results = run_attention_analysis(lens, "The capital of France is")
-summary = head_summary(attn_results)
+attn = lens.attention_map(inputs)
+for layer, data in attn["attention_maps"].items():
+    print(f"{layer}: {data['num_heads']} heads, seq_len={data['seq_length']}")
 ```
+
+> **Note:** Models using SDPA or Flash Attention must be loaded with `attn_implementation="eager"` to return attention weights.
 
 ### Activation Patching
 
-Identify causally important components by patching corrupted activations:
+Replace activations from a clean run with those from a corrupted run to measure each layer's causal impact. Works on all architectures.
 
 ```python
-from modellens.analysis.activation_patching import run_activation_patching
+clean = tokenizer("The Eiffel Tower is in", return_tensors="pt")
+corrupted = tokenizer("The Colosseum is in", return_tensors="pt")
 
-clean = tokenizer("The capital of France is", return_tensors="pt")
-corrupted = tokenizer("The MX of France is", return_tensors="pt")
-
-results = run_activation_patching(lens, clean, corrupted, metric_fn=my_metric)
+results = lens.activation_patch(clean, corrupted)
+for layer, effect in results["patch_effects"].items():
+    print(f"{layer}: {effect['normalized_effect']:.3f}")
 ```
 
-### Residual Stream Analysis
+### Residual Stream Analysis (Transformers, ResNets)
 
-Measure how much each layer contributes to the residual stream:
+Measure how much each layer contributes to the final representation through the residual stream.
 
 ```python
-from modellens.analysis.residual_stream import run_residual_analysis, identify_critical_layers
+residual = lens.residual_stream(inputs)
+for layer, data in residual["contributions"].items():
+    print(f"{layer}: relative_contribution={data['relative_contribution']:.4f}")
 
-results = run_residual_analysis(lens, tokens, layer_names=block_layers)
-critical = identify_critical_layers(results, threshold=0.05)
+from modellens.analysis.residual_stream import identify_critical_layers
+critical = identify_critical_layers(residual, threshold=0.1)
+print(f"Critical layers: {critical}")
 ```
 
-### Embeddings Inspection
+### Embedding Analysis
 
-Analyze token embeddings and their relationships:
+Inspect input embedding representations and compute similarity between token positions.
 
 ```python
-from modellens.analysis.embeddings import run_embeddings_analysis
-
-results = run_embeddings_analysis(lens, tokens)
-print(results["similarity_matrix"])
+emb = lens.embeddings(inputs)
+print(f"Embedding dim: {emb['embed_dim']}")
+print(f"Similarity matrix: {emb['similarity_matrix'].shape}")
 ```
 
-## Project Structure
+### Filter Analysis (CNNs)
+
+Analyze convolutional filters: feature map statistics, dead filter detection, and filter weight inspection.
+
+```python
+lens = ModelLens(cnn_model)
+img = torch.randn(1, 3, 224, 224)
+
+filters = lens.filter_analysis(img)
+print(f"Total filters: {filters['total_filters']}")
+print(f"Dead filters: {filters['total_dead_filters']}")
+
+from modellens.analysis.filters import find_most_active_filters
+top = find_most_active_filters(filters, "conv1", top_k=5)
+```
+
+### Feature Map Evolution (CNNs)
+
+Track how spatial representations evolve through the network.
+
+```python
+fmaps = lens.feature_maps(img)
+print(f"Spatial reduction: {fmaps['spatial_reduction']}x")
+print(f"Channel expansion: {fmaps['channel_expansion']}x")
+
+for entry in fmaps["evolution"]:
+    print(f"  {entry['layer']}: {entry['channels']}ch, "
+          f"{entry['spatial_h']}x{entry['spatial_w']}, "
+          f"sparsity={entry['sparsity']:.2f}")
+```
+
+### Gate Analysis (LSTMs, GRUs)
+
+Decompose gate activations in recurrent models to understand how they process sequences.
+
+```python
+lens = ModelLens(lstm_model)
+tokens = torch.randint(0, vocab_size, (1, 50))
+
+gates = lens.gate_analysis(tokens)
+result = gates["layer_results"]["lstm"]
+
+print(f"Hidden norm trend: {result['hidden_evolution']['norm_trend']}")
+for stat in result["gate_weight_stats"]:
+    layer = stat["layer"]
+    for gate in ["input", "forget", "cell", "output"]:
+        print(f"  Layer {layer} {gate}: norm={stat[gate]['input_weight_norm']:.3f}")
+```
+
+## Supported Architectures
+
+| Architecture | Adapter | Analyses |
+|---|---|---|
+| **Transformers** (GPT-2, LLaMA, Mistral, Gemma, BERT, etc.) | HuggingFaceAdapter | Layer probing, attention maps, activation patching, residual stream, embeddings |
+| **CNNs** (custom, ResNet, VGG, etc.) | PyTorchAdapter | Filter analysis, feature map evolution, layer probing, activation patching |
+| **LSTMs / GRUs** | PyTorchAdapter | Gate analysis, layer probing, activation patching, embeddings |
+| **MLPs** | PyTorchAdapter | Layer probing, activation patching |
+
+For deep transformer-specific analysis with 50+ model support, we recommend [TransformerLens](https://github.com/TransformerLensOrg/TransformerLens). ModelLens is designed for researchers who need interpretability across architecture families.
+
+## Architecture
 
 ```
 modellens/
-├── modellens/
-│   ├── core/           # ModelLens class and hook infrastructure
-│   ├── adapters/       # HuggingFace and PyTorch backend adapters
-│   ├── analysis/       # Interpretability analysis modules
-│   ├── visualization/  # Plotting and visualization utilities
-│   └── utils/          # Shared helper functions
-├── app/                # Streamlit web interface
-├── tests/              # Unit tests
-└── examples/           # Demo notebooks
+├── core/
+│   ├── lens.py          # ModelLens — main entry point
+│   └── hooks.py         # HookManager — activation capture
+├── adapters/
+│   ├── base.py          # BaseAdapter + AnalysisCapability enum
+│   ├── huggingface_adapter.py  # HuggingFace transformers
+│   └── pytorch_adapter.py      # Generic PyTorch (CNN, LSTM, MLP)
+└── analysis/
+    ├── logit_lens.py        # Layer probing (generalized logit lens)
+    ├── attention.py         # Attention map extraction
+    ├── activation_patching.py  # Causal intervention
+    ├── residual_stream.py   # Residual stream analysis
+    ├── embeddings.py        # Embedding inspection
+    ├── filters.py           # CNN filter + feature map analysis
+    └── gates.py             # LSTM/GRU gate analysis
 ```
+
+## Testing
+
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+## License
+
+MIT

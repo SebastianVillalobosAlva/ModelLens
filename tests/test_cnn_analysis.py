@@ -6,7 +6,6 @@ from modellens.analysis.filters import (
     run_filter_analysis,
     run_feature_map_analysis,
     get_filter_weights,
-    find_most_active_filters,
 )
 
 
