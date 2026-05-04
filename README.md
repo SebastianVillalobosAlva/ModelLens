@@ -195,10 +195,18 @@ for stat in result["gate_weight_stats"]:
 |---|---|---|
 | **Transformers** (GPT-2, LLaMA, Mistral, Gemma, BERT, etc.) | HuggingFaceAdapter | Layer probing, attention maps, activation patching, residual stream, embeddings |
 | **CNNs** (custom, ResNet, VGG, etc.) | PyTorchAdapter | Filter analysis, feature map evolution, layer probing, activation patching |
-| **LSTMs / GRUs** | PyTorchAdapter | Gate analysis, layer probing, activation patching, embeddings |
-| **MLPs** | PyTorchAdapter | Layer probing, activation patching |
+| **LSTMs / GRUs / RNNs** | PyTorchAdapter | Gate analysis, layer probing, activation patching, embeddings |
+| **MLPs / Feedforward** | PyTorchAdapter | Layer probing, activation patching |
+
+Composite architectures (Autoencoders, VAEs, GANs) work out of the box since they're built from supported layer types.
 
 For deep transformer-specific analysis with 50+ model support, we recommend [TransformerLens](https://github.com/TransformerLensOrg/TransformerLens). ModelLens is designed for researchers who need interpretability across architecture families.
+
+## Roadmap
+
+- **State Space Models** (Mamba, S4) — state evolution and selective scan analysis
+- **Graph Neural Networks** — message passing and node embedding analysis
+- **MCP Server** — wrap ModelLens as an MCP server so Claude can run interpretability analyses directly
 
 ## Architecture
 
