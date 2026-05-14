@@ -62,6 +62,8 @@ def run_activation_patching(
     # Auto-detect sublayers if not specified
     if layer_names is None:
         layer_names = lens.adapter.get_patchable_layers()
+    # Guaranteed to be a list at this point
+    assert layer_names is not None, "No patchable layers found."
 
     # Step 1: Get clean metric
     with torch.no_grad():

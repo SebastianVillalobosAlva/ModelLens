@@ -218,3 +218,27 @@ class BaseAdapter(ABC):
         Kept for backward compatibility with existing analysis modules.
         """
         return self.get_output_projection()
+
+    # ---- Utility ----
+
+    @staticmethod
+    def infer_module_family(name: str) -> str:
+        """
+        Infer the component family from a module name.
+        Used by circuit discovery and visualization.
+
+        Returns: 'attention', 'mlp', 'conv', 'recurrent', 'linear', or 'other'
+        """
+        lower = name.lower()
+
+        if any(kw in lower for kw in ["attn", "attention", "self_attn"]):
+            return "attention"
+        if any(kw in lower for kw in ["mlp", "feed_forward", "ffn"]):
+            return "mlp"
+        if any(kw in lower for kw in ["conv1d", "conv2d", "conv3d", "conv"]):
+            return "conv"
+        if any(kw in lower for kw in ["lstm", "gru", "rnn"]):
+            return "recurrent"
+        if any(kw in lower for kw in ["linear", "fc", "classifier", "head"]):
+            return "linear"
+        return "other"
