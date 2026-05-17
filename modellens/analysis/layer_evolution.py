@@ -43,8 +43,16 @@ def run_layer_evolution(
     lens.clear()
     if layer_names:
         lens.attach_layers(layer_names)
-    elif len(lens.hooks) == 0:
-        lens.attach_all()
+    else:
+        # Default to sequential layers for cleaner evolution tracking
+        try:
+            seq_layers = lens.adapter.get_sequential_layers()
+            if seq_layers:
+                lens.attach_layers(seq_layers)
+            else:
+                lens.attach_all()
+        except NotImplementedError:
+            lens.attach_all()
 
     output = lens.run(inputs, **kwargs)
     activations = lens.get_activations()
