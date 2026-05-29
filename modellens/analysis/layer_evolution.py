@@ -75,7 +75,7 @@ def run_layer_evolution(
         if act.dim() < 2:
             continue
 
-        logits = act @ output_proj.T
+        logits = act.to(output_proj.dtype) @ output_proj.T
 
         # Handle sequence vs non-sequence models
         if logits.dim() == 3:

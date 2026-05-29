@@ -55,7 +55,7 @@ def run_logit_lens(
 
         # activation shape: (batch, seq_len, hidden_dim) or (batch, hidden_dim)
         # output_proj shape: (output_size, hidden_dim)
-        logits = act @ output_proj.T
+        logits = act.to(output_proj.dtype) @ output_proj.T
 
         # Convert to probabilities
         probs = F.softmax(logits, dim=-1)
