@@ -203,6 +203,12 @@ class ModelLens:
 
         return run_attention_analysis(self, inputs, **kwargs)
 
+    def discover_circuit(self, clean_input, corrupted_input, **kwargs):
+        self.adapter.require(AnalysisCapability.ACTIVATION_PATCHING, "discover_circuit")
+        from modellens.analysis.circuit_discovery import discover_circuit as _discover
+
+        return _discover(self, clean_input, corrupted_input, **kwargs)
+
     # -- Residual stream --
 
     def residual_stream(self, inputs, **kwargs):

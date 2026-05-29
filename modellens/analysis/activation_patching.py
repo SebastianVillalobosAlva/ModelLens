@@ -113,16 +113,14 @@ def _capture_activations(model, available, inputs, layer_names, **kwargs):
         for name in layer_names:
 
             def make_hook(n):
+                # in _capture_activations
                 def hook_fn(module, input, output):
                     if isinstance(output, tuple):
-                        activations[n] = tuple(
-                            o.detach().clone() if o is not None else None
-                            for o in output
-                        )
+                        activations[n] = output[0].detach().clone()  # hidden state only
                     else:
                         activations[n] = output.detach().clone()
 
-                return hook_fn
+                    return hook_fn
 
             hook = available[name].register_forward_hook(make_hook(name))
             hooks.append(hook)
@@ -140,7 +138,10 @@ def _run_with_patch(model, available, inputs, target_layer, patch_activation, **
 
     with _hook_context() as hooks:
 
+        # in _run_with_patch
         def patch_hook(module, input, output, pa=patch_activation):
+            if isinstance(output, tuple):
+                return (pa,) + tuple(output[1:])  # swap hidden, keep live weights/cache
             return pa
 
         hook = available[target_layer].register_forward_hook(patch_hook)
