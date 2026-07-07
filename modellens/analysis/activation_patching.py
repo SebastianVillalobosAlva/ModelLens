@@ -120,7 +120,7 @@ def _capture_activations(model, available, inputs, layer_names, **kwargs):
                     else:
                         activations[n] = output.detach().clone()
 
-                    return hook_fn
+                return hook_fn
 
             hook = available[name].register_forward_hook(make_hook(name))
             hooks.append(hook)
