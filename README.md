@@ -243,8 +243,10 @@ For deep transformer-specific analysis with 50+ model support, we recommend [Tra
 ModelLens ships an [MCP](https://modelcontextprotocol.io) server so
 interpretability analyses can be driven conversationally (e.g. by Claude).
 It exposes `logit_lens`, `layer_evolution`, `discover_circuit`, and
-`sae_features` as tools; each loads a small HuggingFace model by name, runs
-one analysis, and returns JSON-safe output.
+`sae_analysis` as tools; each loads a small HuggingFace model by name, runs
+one analysis, and returns JSON-safe output. `sae_analysis` trains a sparse
+autoencoder and returns three consistent views of it — feature meaning, health,
+and the learned dictionary.
 
 ```bash
 pip install -e ".[mcp]"   # install the optional MCP dependency
