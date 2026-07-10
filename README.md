@@ -189,6 +189,41 @@ for stat in result["gate_weight_stats"]:
         print(f"  Layer {layer} {gate}: norm={stat[gate]['input_weight_norm']:.3f}")
 ```
 
+### Sparse Autoencoders (Dictionary Learning)
+
+Train a sparse autoencoder on a model's activations, then inspect the features it learned. Training builds and fits a new network, so it's a module-level call — not a lens method. Inspection comes in three complementary views.
+
+```python
+from modellens.analysis.sparse_autoencoder import train_sae
+
+# Fit an overcomplete SAE on a host model's activations.
+# layer_name defaults to a residual-stream layer when the model has one.
+sae, summary = train_sae(lens, inputs, layer_name="transformer.h.5",
+                         expansion=4, steps=500)
+print(f"recon {summary['initial_recon_loss']:.3f} -> {summary['final_recon_loss']:.3f}, "
+      f"dead={summary['dead_features']}")
+
+# 1) What features mean — max-activating inputs/tokens per feature
+feats = lens.sae_features(inputs, sae, layer_name="transformer.h.5", tokenizer=tokenizer)
+for feature, data in list(feats["feature_summary"].items())[:3]:
+    print(feature, data["top_activations"][0])
+
+# Point the lens at the trained SAE itself for the dictionary-level views:
+sae_lens = ModelLens(sae)
+sae_lens.available_analyses()  # includes 'dictionary_analysis'
+
+# 2) SAE health — dead features, firing rates, activation stats.
+# Pass activation vectors in the SAE's input space, shape (N, input_dim)
+# (in practice, activations gathered from the host at the trained layer).
+activations = torch.randn(64, sae.input_dim)
+health = sae_lens.dictionary_features(activations, top_k=10)
+print(f"{len(health['dead_features'])} dead / {health['num_features']} features")
+
+# 3) The learned dictionary — the decoder direction each feature writes
+directions = sae_lens.feature_directions()
+print(directions["directions"].shape)  # (num_features, input_dim)
+```
+
 ## Supported Architectures
 
 | Architecture | Adapter | Analyses |
@@ -197,8 +232,9 @@ for stat in result["gate_weight_stats"]:
 | **CNNs** (custom, ResNet, VGG, etc.) | PyTorchAdapter | Filter analysis, feature map evolution, layer probing, activation patching |
 | **LSTMs / GRUs / RNNs** | PyTorchAdapter | Gate analysis, layer probing, activation patching, embeddings |
 | **MLPs / Feedforward** | PyTorchAdapter | Layer probing, activation patching |
+| **Autoencoders** (overcomplete / sparse) | PyTorchAdapter | Dictionary analysis, feature directions, layer probing, activation patching |
 
-Composite architectures (Autoencoders, VAEs, GANs) work out of the box since they're built from supported layer types.
+Overcomplete autoencoders are detected automatically (input dim == output dim, with a wider hidden layer) and gain SAE dictionary analysis. Other composite architectures (VAEs, GANs) work out of the box since they're built from supported layer types.
 
 For deep transformer-specific analysis with 50+ model support, we recommend [TransformerLens](https://github.com/TransformerLensOrg/TransformerLens). ModelLens is designed for researchers who need interpretability across architecture families.
 
@@ -232,15 +268,23 @@ modellens/
 ├── adapters/
 │   ├── base.py          # BaseAdapter + AnalysisCapability enum
 │   ├── huggingface_adapter.py  # HuggingFace transformers
-│   └── pytorch_adapter.py      # Generic PyTorch (CNN, LSTM, MLP)
-└── analysis/
-    ├── logit_lens.py        # Layer probing (generalized logit lens)
-    ├── attention.py         # Attention map extraction
-    ├── activation_patching.py  # Causal intervention
-    ├── residual_stream.py   # Residual stream analysis
-    ├── embeddings.py        # Embedding inspection
-    ├── filters.py           # CNN filter + feature map analysis
-    └── gates.py             # LSTM/GRU gate analysis
+│   └── pytorch_adapter.py      # Generic PyTorch (CNN, LSTM, MLP, autoencoder)
+├── analysis/
+│   ├── logit_lens.py        # Layer probing (generalized logit lens)
+│   ├── layer_evolution.py   # Prediction-distribution evolution across layers
+│   ├── attention.py         # Attention map extraction
+│   ├── activation_patching.py  # Causal intervention
+│   ├── circuit_discovery.py    # Automatic circuit discovery
+│   ├── residual_stream.py   # Residual stream analysis
+│   ├── embeddings.py        # Embedding inspection
+│   ├── filters.py           # CNN filter + feature map analysis
+│   ├── gates.py             # LSTM/GRU gate analysis
+│   └── sparse_autoencoder.py   # SAE training + dictionary analysis
+├── helpers/
+│   ├── activations.py   # Shared activation-shape utilities
+│   └── layers.py        # Shared layer-selection utilities
+└── mcp/
+    └── server.py        # MCP server (modellens-mcp)
 ```
 
 ## Testing
