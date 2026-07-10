@@ -185,6 +185,20 @@ class ModelLens:
         """Alias for layer_probe(). Kept for backward compatibility."""
         return self.layer_probe(inputs, **kwargs)
 
+    def layer_evolution(self, inputs, **kwargs):
+        """
+        Track the full prediction distribution as it evolves across layers.
+
+        Projects each layer's hidden state through the output projection and
+        records the top-k distribution, entropy, and KL-divergence trajectory —
+        a richer view than layer_probe's per-layer snapshot. Works on any
+        architecture with a hidden → output mapping.
+        """
+        self.adapter.require(AnalysisCapability.LAYER_PROBING, "layer_evolution")
+        from modellens.analysis.layer_evolution import run_layer_evolution
+
+        return run_layer_evolution(self, inputs, **kwargs)
+
     # -- Embedding analyses --
 
     def embeddings(self, inputs, **kwargs):
@@ -255,6 +269,22 @@ class ModelLens:
         from modellens.analysis.filters import run_feature_map_analysis
 
         return run_feature_map_analysis(self, inputs, **kwargs)
+
+    # -- Feature analyses (dictionary learning) --
+
+    def sae_features(self, inputs, sae, **kwargs):
+        """
+        Run inputs through a trained sparse autoencoder and report which
+        features fire, plus a per-feature top-activating inputs/tokens summary
+        so the learned features are inspectable.
+
+        Train the SAE first with the module-level
+        modellens.analysis.sparse_autoencoder.train_sae(lens, inputs, ...).
+        """
+        self.adapter.require(AnalysisCapability.HOOKS, "sae_features")
+        from modellens.analysis.sparse_autoencoder import sae_features as _sae_features
+
+        return _sae_features(self, inputs, sae, **kwargs)
 
     # ---- Cleanup ----
 

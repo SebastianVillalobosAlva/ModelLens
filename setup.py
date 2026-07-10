@@ -19,6 +19,14 @@ setup(
         "app": [
             "gradio>=4.0.0",
         ],
+        "mcp": [
+            "mcp>=1.0.0",
+        ],
         "dev": [],
+    },
+    entry_points={
+        "console_scripts": [
+            "modellens-mcp=modellens.mcp.server:main",
+        ],
     },
 )

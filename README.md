@@ -202,11 +202,25 @@ Composite architectures (Autoencoders, VAEs, GANs) work out of the box since the
 
 For deep transformer-specific analysis with 50+ model support, we recommend [TransformerLens](https://github.com/TransformerLensOrg/TransformerLens). ModelLens is designed for researchers who need interpretability across architecture families.
 
+## MCP Server
+
+ModelLens ships an [MCP](https://modelcontextprotocol.io) server so
+interpretability analyses can be driven conversationally (e.g. by Claude).
+It exposes `logit_lens`, `layer_evolution`, `discover_circuit`, and
+`sae_features` as tools; each loads a small HuggingFace model by name, runs
+one analysis, and returns JSON-safe output.
+
+```bash
+pip install -e ".[mcp]"   # install the optional MCP dependency
+modellens-mcp             # start the server (stdio transport)
+```
+
+Point any MCP client at the `modellens-mcp` command to make the tools available.
+
 ## Roadmap
 
 - **State Space Models** (Mamba, S4) — state evolution and selective scan analysis
 - **Graph Neural Networks** — message passing and node embedding analysis
-- **MCP Server** — wrap ModelLens as an MCP server so Claude can run interpretability analyses directly
 
 ## Architecture
 
