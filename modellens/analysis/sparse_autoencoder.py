@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from typing import Any, Dict, List, Optional, Tuple
 
 from modellens.adapters.base import AnalysisCapability
+from modellens.helpers.activations import gather_activation_rows
+from modellens.helpers.layers import default_residual_layer
 
 
 class SparseAutoencoder(nn.Module):
@@ -180,7 +182,7 @@ def sae_features(
     feature_hits: Dict[int, List[Tuple[float, int, int, Optional[str]]]] = {}
 
     for i, inp in enumerate(input_list):
-        rows, prov = _gather_one(lens, inp, layer_name, tokenizer, **kwargs)
+        rows, prov = gather_activation_rows(lens, inp, layer_name, tokenizer, **kwargs)
         with torch.no_grad():
             codes = sae.encode(rows)  # (num_rows, num_features), >= 0
 
@@ -230,6 +232,149 @@ def sae_features(
     }
 
 
+def dictionary_features(lens, activations: Any, *, top_k: int = 10) -> Dict[str, Any]:
+    """
+    Inspect a sparse autoencoder's learned feature dictionary.
+
+    Unlike sae_features (which encodes a *host* model's activations through an
+    external SAE probe), this points ModelLens directly at a trained SAE — the
+    SAE is the model under the lens — and passes activation vectors in the SAE's
+    own input space. It reports which dictionary features fire, per-feature
+    activation statistics, dead features, and the decoder directions (the
+    dictionary) each feature writes.
+
+    Available when the adapter detects an overcomplete autoencoder
+    (DICTIONARY_ANALYSIS capability).
+
+    Args:
+        lens: ModelLens wrapping a trained SAE
+        activations: Activation vectors, shape (N, input_dim)
+        top_k: Number of top features to report per input
+
+    Returns:
+        Dict with per-input firings, per-feature stats, dead features, and the
+        decoder dictionary norms.
+    """
+    lens.adapter.require(AnalysisCapability.DICTIONARY_ANALYSIS, "dictionary_features")
+
+    model = lens.model
+    X = activations if isinstance(activations, torch.Tensor) else torch.as_tensor(activations)
+    X = X.float()
+    if X.dim() == 1:
+        X = X.unsqueeze(0)
+
+    with torch.no_grad():
+        if hasattr(model, "encode"):
+            codes = model.encode(X)
+        else:
+            # Fallback: first Linear followed by ReLU.
+            linear = next(m for m in model.modules() if isinstance(m, nn.Linear))
+            codes = F.relu(linear(X))
+
+    num_features = codes.shape[1]
+    fired = codes > 0
+    fires_per_feature = fired.sum(dim=0)
+    dead = torch.nonzero(fires_per_feature == 0, as_tuple=False).flatten().tolist()
+    active = torch.nonzero(fires_per_feature > 0, as_tuple=False).flatten().tolist()
+
+    # Decoder directions = the learned dictionary (last Linear's columns).
+    linears = [m for m in model.modules() if isinstance(m, nn.Linear)]
+    decoder_norms = None
+    if linears and linears[-1].in_features == num_features:
+        decoder_norms = linears[-1].weight.detach().norm(dim=0)  # (num_features,)
+
+    feature_stats = {}
+    for f in active:
+        col = codes[:, f]
+        stat = {
+            "activation_mean": float(col.mean()),
+            "activation_max": float(col.max()),
+            "fires": int(fires_per_feature[f].item()),
+        }
+        if decoder_norms is not None:
+            stat["direction_norm"] = float(decoder_norms[f].item())
+        feature_stats[f] = stat
+
+    per_input = []
+    for i in range(X.shape[0]):
+        row = codes[i]
+        k = min(top_k, num_features)
+        top_vals, top_idx = torch.topk(row, k=k)
+        per_input.append(
+            {
+                "input_index": i,
+                "num_active": int((row > 0).sum().item()),
+                "top_features": [
+                    (int(fi), float(v)) for fi, v in zip(top_idx, top_vals)
+                ],
+            }
+        )
+
+    return {
+        "num_features": num_features,
+        "num_inputs": int(X.shape[0]),
+        "active_features": active,
+        "dead_features": dead,
+        "feature_stats": feature_stats,
+        "per_input": per_input,
+    }
+
+
+def feature_directions(lens, *, normalize: bool = False) -> Dict[str, Any]:
+    """
+    Return a sparse autoencoder's learned dictionary — the direction each
+    feature writes into activation space.
+
+    This is the third view of an SAE, alongside:
+      - sae_features:       what features mean (max-activating inputs/tokens)
+      - dictionary_features: SAE health (dead features, firing statistics)
+      - feature_directions:  the dictionary itself (the decoder vectors)
+
+    Point ModelLens at a trained SAE. Each feature's direction is the matching
+    column of the decoder weight (what the feature adds to the reconstruction);
+    the encoder rows (what each feature reads in) are returned too when they
+    line up with the feature count.
+
+    Args:
+        lens: ModelLens wrapping a trained SAE
+        normalize: If True, return unit-norm direction vectors
+
+    Returns:
+        Dict with the decoder directions (num_features, input_dim), their
+        norms, and — when available — the encoder read-in directions.
+    """
+    lens.adapter.require(AnalysisCapability.DICTIONARY_ANALYSIS, "feature_directions")
+
+    model = lens.model
+    linears = [m for m in model.modules() if isinstance(m, nn.Linear)]
+    if len(linears) < 2:
+        raise ValueError(
+            "Model does not look like an autoencoder (need >= 2 Linear layers)."
+        )
+
+    encoder, decoder = linears[0], linears[-1]
+    # decoder.weight is (input_dim, num_features); feature j's direction is
+    # column j — transpose so row j is that direction.
+    directions = decoder.weight.detach().t().contiguous()  # (num_features, input_dim)
+    norms = directions.norm(dim=1)  # (num_features,)
+
+    if normalize:
+        directions = directions / (norms.unsqueeze(1) + 1e-10)
+
+    result = {
+        "num_features": directions.shape[0],
+        "input_dim": directions.shape[1],
+        "directions": directions,
+        "norms": norms,
+    }
+
+    # Encoder rows (read-in directions) — only when they match the feature count.
+    if encoder.out_features == directions.shape[0]:
+        result["encoder_directions"] = encoder.weight.detach().contiguous()
+
+    return result
+
+
 # ---- Private Helpers ----
 
 
@@ -245,7 +390,7 @@ def _resolve_layer(lens, layer_name: Optional[str], analysis_name: str) -> str:
     if layer_name is not None:
         return layer_name
 
-    default = _default_residual_layer(lens)
+    default = default_residual_layer(lens)
     if default is None:
         raise ValueError(
             "No layer_name given and the model has no residual stream to "
@@ -254,90 +399,13 @@ def _resolve_layer(lens, layer_name: Optional[str], analysis_name: str) -> str:
     return default
 
 
-def _default_residual_layer(lens) -> Optional[str]:
-    """
-    Pick a residual-stream hook site, reusing the same layer lookup that the
-    residual_stream analysis uses (the adapter's ordered sequential layers).
-    Returns None when the model has no residual stream, so the caller can
-    require an explicit layer_name instead.
-    """
-    if not lens.adapter.supports(AnalysisCapability.RESIDUAL_STREAM):
-        return None
-    try:
-        seq_layers = lens.adapter.get_sequential_layers()
-    except NotImplementedError:
-        return None
-    if not seq_layers:
-        return None
-    # Middle of the stack — a feature-rich point in the residual stream.
-    return seq_layers[len(seq_layers) // 2]
-
-
 def _gather_matrix(lens, inputs: Any, layer_name: str, **kwargs) -> torch.Tensor:
     """Collect activations at layer_name across inputs into an (N, d) matrix."""
     input_list = list(inputs) if isinstance(inputs, (list, tuple)) else [inputs]
     chunks = []
     for inp in input_list:
-        rows, _ = _gather_one(lens, inp, layer_name, None, **kwargs)
+        rows, _ = gather_activation_rows(lens, inp, layer_name, None, **kwargs)
         chunks.append(rows)
     if not chunks:
         raise ValueError("No activations gathered — empty inputs.")
     return torch.cat(chunks, dim=0)
-
-
-def _gather_one(
-    lens, inp: Any, layer_name: str, tokenizer, **kwargs
-) -> Tuple[torch.Tensor, List[Dict[str, Any]]]:
-    """Run one forward pass and return flattened activation rows + provenance."""
-    lens.attach_layers([layer_name])
-    lens.run(inp, **kwargs)
-    act = lens.get_layer_activation(layer_name)
-    if act is None:
-        raise ValueError(f"No activation captured at layer '{layer_name}'.")
-    return _flatten_activation(act, inp, tokenizer)
-
-
-def _flatten_activation(
-    act: torch.Tensor, inp: Any, tokenizer
-) -> Tuple[torch.Tensor, List[Dict[str, Any]]]:
-    """
-    Flatten an activation tensor to (num_rows, feature_dim) and record the
-    token position each row came from (with a decoded token string when a
-    tokenizer and a matching string input are available).
-    """
-    d = act.shape[-1]
-
-    if act.dim() == 3:
-        # (batch, seq, d) — sequence model
-        _, seq_len, _ = act.shape
-        rows = act.reshape(-1, d)
-        tokens = _token_strings(inp, tokenizer, seq_len)
-        prov = []
-        for r in range(rows.shape[0]):
-            pos = r % seq_len
-            prov.append({"position": pos, "token": tokens[pos] if tokens else None})
-    elif act.dim() == 2:
-        # (batch, d) — non-sequence model
-        rows = act
-        prov = [{"position": 0, "token": None} for _ in range(rows.shape[0])]
-    else:
-        rows = act.reshape(-1, d)
-        prov = [{"position": r, "token": None} for r in range(rows.shape[0])]
-
-    return rows.float(), prov
-
-
-def _token_strings(inp: Any, tokenizer, seq_len: int) -> Optional[List[str]]:
-    """Best-effort decode of a string input into per-position token strings."""
-    if tokenizer is None or not isinstance(inp, str):
-        return None
-    try:
-        ids = tokenizer(inp)["input_ids"]
-    except Exception:
-        return None
-    if len(ids) != seq_len:
-        return None
-    try:
-        return [tokenizer.decode([i]) for i in ids]
-    except Exception:
-        return None

@@ -30,6 +30,10 @@ class AnalysisCapability(Enum):
     FILTER_ANALYSIS = "filter_analysis"
     FEATURE_MAP_ANALYSIS = "feature_map_analysis"
 
+    # Autoencoder-specific — inspect a (sparse) autoencoder's learned
+    # feature dictionary. Enabled for overcomplete autoencoders.
+    DICTIONARY_ANALYSIS = "dictionary_analysis"
+
 
 class UnsupportedAnalysisError(Exception):
     """Raised when an analysis is not supported by the current adapter."""

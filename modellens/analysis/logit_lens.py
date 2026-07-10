@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 from typing import Dict, List, Optional
 
+from modellens.helpers.activations import normalize_activation
+
 
 def run_logit_lens(
     lens, inputs, layer_names: Optional[List[str]] = None, top_k: int = 5, **kwargs
@@ -49,7 +51,7 @@ def run_logit_lens(
             continue
 
         # Handle different activation shapes
-        act = _normalize_activation(activation, hidden_dim)
+        act = normalize_activation(activation, hidden_dim)
         if act is None:
             continue
 
@@ -79,25 +81,6 @@ def run_logit_lens(
         "layer_results": results,
         "final_output": output,
     }
-
-
-def _normalize_activation(activation: torch.Tensor, hidden_dim: int):
-    """
-    Normalize activation tensor to be compatible with the output projection.
-
-    Handles different shapes from different architectures:
-    - Transformers: (batch, seq_len, hidden_dim)
-    - MLPs: (batch, hidden_dim)
-    - CNNs: (batch, channels, H, W) → global average pool to (batch, channels)
-    """
-    if activation.shape[-1] == hidden_dim:
-        return activation
-
-    # CNN feature maps: pool spatial dimensions
-    if activation.dim() == 4 and activation.shape[1] == hidden_dim:
-        return activation.mean(dim=(2, 3))  # Global average pool
-
-    return None
 
 
 def decode_logit_lens(results: Dict, tokenizer=None, vocab=None) -> Dict:
