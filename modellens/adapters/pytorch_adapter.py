@@ -49,6 +49,8 @@ class PyTorchAdapter(BaseAdapter):
             return "recurrent"
         if has_conv:
             return "convolutional"
+        if self._looks_like_autoencoder():
+            return "autoencoder"
         return "feedforward"
 
     def _has_module_type(self, types: tuple) -> bool:
@@ -56,6 +58,36 @@ class PyTorchAdapter(BaseAdapter):
         return any(
             isinstance(module, types) for _, module in self.model.named_modules()
         )
+
+    def _linear_layers(self) -> List[nn.Linear]:
+        """Return the model's Linear layers in definition order."""
+        return [m for _, m in self.model.named_modules() if isinstance(m, nn.Linear)]
+
+    def _looks_like_autoencoder(self) -> bool:
+        """
+        Detect a (linear) autoencoder by its reconstruction shape: the first
+        Linear's input dim equals the last Linear's output dim. This is what
+        separates an autoencoder from an MLP classifier, whose output space is
+        class logits (out != in). "Sparse" itself is not structural — it comes
+        from the training objective — so it is confirmed at runtime, not here.
+        """
+        linears = self._linear_layers()
+        if len(linears) < 2:
+            return False
+        return linears[0].in_features == linears[-1].out_features
+
+    def _is_overcomplete(self) -> bool:
+        """
+        Whether a detected autoencoder is overcomplete — some hidden layer is
+        wider than the input. This is the structural signature of a
+        dictionary / sparse autoencoder, versus a compressive bottleneck AE.
+        """
+        linears = self._linear_layers()
+        if len(linears) < 2:
+            return False
+        d_in = linears[0].in_features
+        hidden = max(layer.out_features for layer in linears[:-1])
+        return hidden > d_in
 
     # ---- Capabilities ----
 
@@ -87,6 +119,10 @@ class PyTorchAdapter(BaseAdapter):
         if self._arch_family == "convolutional":
             caps.add(AnalysisCapability.FILTER_ANALYSIS)
             caps.add(AnalysisCapability.FEATURE_MAP_ANALYSIS)
+
+        # Overcomplete autoencoder — its learned dictionary can be inspected
+        if self._arch_family == "autoencoder" and self._is_overcomplete():
+            caps.add(AnalysisCapability.DICTIONARY_ANALYSIS)
 
         # Residual connections for non-transformers
         if self.has_residual_connections():

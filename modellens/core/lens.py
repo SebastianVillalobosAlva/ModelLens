@@ -286,6 +286,32 @@ class ModelLens:
 
         return _sae_features(self, inputs, sae, **kwargs)
 
+    def dictionary_features(self, activations, **kwargs):
+        """
+        Inspect a sparse autoencoder's learned feature dictionary. Point the
+        lens at a trained SAE (ModelLens(sae)) and pass activation vectors in
+        its input space. Available for overcomplete autoencoders.
+        """
+        self.adapter.require(AnalysisCapability.DICTIONARY_ANALYSIS, "dictionary_features")
+        from modellens.analysis.sparse_autoencoder import (
+            dictionary_features as _dictionary_features,
+        )
+
+        return _dictionary_features(self, activations, **kwargs)
+
+    def feature_directions(self, **kwargs):
+        """
+        Return a sparse autoencoder's learned dictionary — the decoder
+        direction each feature writes into activation space (plus encoder
+        read-in directions). Available for overcomplete autoencoders.
+        """
+        self.adapter.require(AnalysisCapability.DICTIONARY_ANALYSIS, "feature_directions")
+        from modellens.analysis.sparse_autoencoder import (
+            feature_directions as _feature_directions,
+        )
+
+        return _feature_directions(self, **kwargs)
+
     # ---- Cleanup ----
 
     def clear(self) -> None:

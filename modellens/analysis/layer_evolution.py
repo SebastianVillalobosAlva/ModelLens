@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 
 from modellens.adapters.base import AnalysisCapability
+from modellens.helpers.activations import normalize_activation
 
 
 def run_layer_evolution(
@@ -67,7 +68,7 @@ def run_layer_evolution(
 
     for name, activation in activations.items():
         # Normalize activation shape for different architectures
-        act = _normalize_activation(activation, hidden_dim)
+        act = normalize_activation(activation, hidden_dim)
         if act is None:
             continue
 
@@ -337,21 +338,6 @@ def _find_key_moments(
         }
 
     return moments
-
-
-def _normalize_activation(activation: torch.Tensor, hidden_dim: int):
-    """
-    Normalize activation tensor to be compatible with the output projection.
-    Handles transformers, MLPs, and CNNs.
-    """
-    if activation.shape[-1] == hidden_dim:
-        return activation
-
-    # CNN feature maps: pool spatial dimensions
-    if activation.dim() == 4 and activation.shape[1] == hidden_dim:
-        return activation.mean(dim=(2, 3))
-
-    return None
 
 
 def _empty_result() -> Dict[str, Any]:
