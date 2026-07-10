@@ -21,6 +21,7 @@ from mcp.server.fastmcp import FastMCP
 
 from modellens.core.lens import ModelLens
 from modellens.analysis.sparse_autoencoder import train_sae
+from modellens.helpers.activations import gather_activation_rows
 
 server = FastMCP("modellens")
 
@@ -126,7 +127,7 @@ def discover_circuit(
 
 
 @server.tool()
-def sae_features(
+def sae_analysis(
     model_ref: str,
     text: str,
     layer_name: Optional[str] = None,
@@ -134,18 +135,60 @@ def sae_features(
     steps: int = 200,
     top_k: int = 10,
 ) -> dict:
-    """Train a sparse autoencoder on the model's activations for the given
-    text, then report which features fire and their top activations."""
+    """Train a sparse autoencoder on the model's activations for the given text,
+    then return three consistent views of that one SAE: what its top features
+    mean (max-activating tokens), its health (dead vs. active features), and its
+    learned dictionary (top features by decoder-vector norm). All views share
+    the same feature indices because they come from a single trained SAE."""
     lens, tokenizer = _load_lens(model_ref)
     sae, summary = train_sae(
         lens, text, layer_name=layer_name, expansion=expansion, steps=steps
     )
-    features = lens.sae_features(
-        text, sae, layer_name=layer_name, top_k=top_k, tokenizer=tokenizer
+    resolved_layer = summary["layer_name"]
+
+    # View 1 — what features mean (host activations through the SAE probe).
+    feats = lens.sae_features(
+        text, sae, layer_name=resolved_layer, top_k=top_k, tokenizer=tokenizer
     )
+    top_features = [
+        {
+            "feature": int(feature),
+            "peak_activation": round(data["top_activations"][0]["value"], 4),
+            "example_token": data["top_activations"][0]["token"],
+        }
+        for feature, data in feats["feature_summary"].items()
+    ]
+    top_features.sort(key=lambda f: f["peak_activation"], reverse=True)
+    top_features = top_features[:top_k]
+
+    # Views 2 & 3 — point the lens at the trained SAE itself.
+    sae_lens = ModelLens(sae)
+    rows, _ = gather_activation_rows(lens, text, resolved_layer)
+    health = sae_lens.dictionary_features(rows, top_k=top_k)
+    directions = sae_lens.feature_directions()
+
+    norms = directions["norms"]
+    k = min(top_k, int(norms.shape[0]))
+    top_norm_vals, top_norm_idx = torch.topk(norms, k=k)
+    top_by_norm = [
+        [int(i), round(float(v), 4)] for i, v in zip(top_norm_idx, top_norm_vals)
+    ]
+
     return {
-        "training_summary": _to_jsonable(summary),
-        "features": _to_jsonable(features),
+        "model": model_ref,
+        "layer": resolved_layer,
+        "training": _to_jsonable(summary),
+        "top_features": top_features,
+        "health": {
+            "num_features": health["num_features"],
+            "dead": len(health["dead_features"]),
+            "active": len(health["active_features"]),
+        },
+        "dictionary": {
+            "num_features": directions["num_features"],
+            "input_dim": directions["input_dim"],
+            "top_features_by_norm": top_by_norm,
+        },
     }
 
 

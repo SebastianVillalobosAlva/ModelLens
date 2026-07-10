@@ -13,7 +13,7 @@ def test_server_lists_expected_tools():
     tools = asyncio.run(mcp_server.server.list_tools())
     names = {t.name for t in tools}
 
-    expected = {"logit_lens", "layer_evolution", "discover_circuit", "sae_features"}
+    expected = {"logit_lens", "layer_evolution", "discover_circuit", "sae_analysis"}
     assert expected.issubset(names)
 
 
