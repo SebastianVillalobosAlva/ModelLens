@@ -6,30 +6,39 @@ Point ModelLens at any PyTorch model — transformer, CNN, LSTM, GRU, or MLP —
 
 Unlike tools like [TransformerLens](https://github.com/TransformerLensOrg/TransformerLens) that focus exclusively on transformers, ModelLens is designed for researchers and engineers who need interpretability across architecture families.
 
-## Quickstart
+## Flagship example: do CAA and LoRA steer through the same circuit?
+
+ModelLens is architecture-agnostic, but its sharpest use is **causal**: given two versions of a model, did an intervention actually *rewire the circuit* behind a behavior, or just nudge the output? That question can't be answered by behavioral evals — you have to look inside.
+
+This is the flagship result from the companion [Stoic-Steering](https://github.com/SebastianVillalobosAlva/Stoic-Steering) project (Exp 12), which steers Llama-3.2-1B toward Stoic philosophy two ways — Contrastive Activation Addition (CAA) and LoRA fine-tuning — and uses ModelLens's `discover_circuit` to compare what each does *mechanistically*.
 
 ```python
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from modellens import ModelLens
 
-model = AutoModelForCausalLM.from_pretrained("gpt2", attn_implementation="eager")
-tokenizer = AutoTokenizer.from_pretrained("gpt2")
+# Three variants of Llama-3.2-1B from the Stoic-Steering project:
+#   base, CAA-steered (layer 12, coefficient 0.11), and LoRA fine-tuned.
+lens_base = ModelLens(base_model)
+lens_caa  = ModelLens(caa_model)
+lens_lora = ModelLens(lora_model)
 
-lens = ModelLens(model)
-lens.adapter.set_tokenizer(tokenizer)
+# A Stoic-vs-neutral contrast pair (clean = Stoic framing, corrupted = neutral).
+clean     = tokenizer("The obstacle is within my control, so", return_tensors="pt")
+corrupted = tokenizer("The weather today is", return_tensors="pt")
 
-print(lens)
-# ModelLens(
-#   backend=huggingface,
-#   architecture=transformer,
-#   params=124,439,808,
-#   analyses=['activation_patching', 'attention_maps', 'embeddings',
-#             'hooks', 'layer_probing', 'residual_stream']
-# )
-
-inputs = tokenizer("The capital of France is", return_tensors="pt")
-results = lens.layer_probe(inputs, top_k=5)
+# Discover the causal circuit behind the Stoic continuation in each variant.
+circuit_base = lens_base.discover_circuit(clean, corrupted)
+circuit_caa  = lens_caa.discover_circuit(clean, corrupted)
+circuit_lora = lens_lora.discover_circuit(clean, corrupted)
 ```
+
+**Finding.** Comparing the discovered circuits:
+
+- **CAA at coefficient 0.11 is a circuit-level no-op** — the steered model's circuit matches the base model's. Adding a steering vector at one layer shifts the output distribution without rewiring the causal pathway.
+- **LoRA rewires the Stoic-content circuit** — the fine-tuned model routes the behavior through a measurably different set of components, and the rewiring is **largest for Seneca** among the three philosophers.
+
+Two interventions that look similar at the output level operate through **different internal mechanisms** — exactly the kind of claim ModelLens exists to make. See the [Stoic-Steering README](https://github.com/SebastianVillalobosAlva/Stoic-Steering), which names ModelLens as its companion interpretability toolkit.
+
+> **New to ModelLens?** See [How It Works](#how-it-works) below for the one-liner API (`ModelLens(model)`) and per-architecture examples.
 
 ## Installation
 
