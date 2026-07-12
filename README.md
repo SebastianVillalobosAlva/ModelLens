@@ -10,7 +10,7 @@ Unlike tools like [TransformerLens](https://github.com/TransformerLensOrg/Transf
 
 ModelLens is architecture-agnostic, but its sharpest use is **causal**: given two versions of a model, did an intervention actually *rewire the circuit* behind a behavior, or just nudge the output? That question can't be answered by behavioral evals — you have to look inside.
 
-This is the flagship result from the companion [Stoic-Steering](https://github.com/SebastianVillalobosAlva/Stoic-LLM-Steering) project (Exp 12), which steers Llama-3.2-1B toward Stoic philosophy two ways — Contrastive Activation Addition (CAA) and LoRA fine-tuning — and uses ModelLens's `discover_circuit` to compare what each does *mechanistically*.
+This is the flagship result from the companion [Stoic-Steering](https://github.com/SebastianVillalobosAlva/Stoic-Steering) project (Exp 12), which steers Llama-3.2-1B toward Stoic philosophy two ways — Contrastive Activation Addition (CAA) and LoRA fine-tuning — and uses ModelLens's `discover_circuit` to compare what each does *mechanistically*.
 
 ```python
 from modellens import ModelLens
@@ -36,7 +36,7 @@ circuit_lora = lens_lora.discover_circuit(clean, corrupted)
 - **CAA at coefficient 0.11 is a circuit-level no-op** — the steered model's circuit matches the base model's. Adding a steering vector at one layer shifts the output distribution without rewiring the causal pathway.
 - **LoRA rewires the Stoic-content circuit** — the fine-tuned model routes the behavior through a measurably different set of components, and the rewiring is **largest for Seneca** among the three philosophers.
 
-Two interventions that look similar at the output level operate through **different internal mechanisms** — exactly the kind of claim ModelLens exists to make. See the [Stoic-Steering README](https://github.com/SebastianVillalobosAlva/Stoic-LLM-Steering), which names ModelLens as its companion interpretability toolkit.
+Two interventions that look similar at the output level operate through **different internal mechanisms** — exactly the kind of claim ModelLens exists to make. See the [Stoic-Steering README](https://github.com/SebastianVillalobosAlva/Stoic-Steering), which names ModelLens as its companion interpretability toolkit.
 
 > **New to ModelLens?** See [How It Works](#how-it-works) below for the one-liner API (`ModelLens(model)`) and per-architecture examples.
 
