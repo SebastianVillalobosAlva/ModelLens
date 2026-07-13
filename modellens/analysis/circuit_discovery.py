@@ -2,7 +2,10 @@ import re
 import torch
 from typing import Any, Callable, Dict, List, Optional
 from modellens.adapters.base import AnalysisCapability
-from modellens.analysis.activation_patching import run_activation_patching
+from modellens.analysis.activation_patching import (
+    run_activation_patching,
+    run_attribution_patching,
+)
 
 
 def discover_circuit(
@@ -13,6 +16,7 @@ def discover_circuit(
     metric_fn: Optional[Callable] = None,
     importance_threshold: float = 0.15,
     layer_names: Optional[List[str]] = None,
+    method: str = "exact",
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -29,10 +33,13 @@ def discover_circuit(
         lens: ModelLens instance
         clean_input: Input that produces the "correct" behavior
         corrupted_input: Modified input that produces different behavior
-        metric_fn: Custom metric function for patching
+        metric_fn: Custom metric function for patching. With method="exact" it
+                   returns a float; with method="attribution" a scalar tensor.
         importance_threshold: Minimum |normalized_effect| to be included
         layer_names: Sublayers to patch. If None, uses adapter's
                      get_patchable_layers().
+        method: "exact" (one forward pass per layer) or "attribution"
+                (gradient approximation, ~2 passes — scales to large models).
 
     Returns:
         Dict with nodes, edges, and metadata for circuit visualization.
@@ -45,7 +52,14 @@ def discover_circuit(
     # Guaranteed to be a list at this point
     assert layer_names is not None, "No patchable layers found."
 
-    patch_results = run_activation_patching(
+    if method == "attribution":
+        _patch = run_attribution_patching
+    elif method == "exact":
+        _patch = run_activation_patching
+    else:
+        raise ValueError(f"Unknown method '{method}'. Use 'exact' or 'attribution'.")
+
+    patch_results = _patch(
         lens,
         clean_input,
         corrupted_input,
