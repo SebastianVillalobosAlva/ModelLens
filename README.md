@@ -233,6 +233,28 @@ directions = sae_lens.feature_directions()
 print(directions["directions"].shape)  # (num_features, input_dim)
 ```
 
+### Concept Probing
+
+Train a small linear classifier on a layer's activations to measure whether — and *where* — a concept is linearly represented. Probing only needs activation capture, so it works on **any** architecture (sequence activations are pooled by token, CNN feature maps by spatial average). Training fits a new classifier, so `train_probe`/`probe_sweep` are module-level functions (like `train_sae`); running a trained probe is inspection and lives on the lens.
+
+```python
+from modellens.analysis.probing import train_probe, probe_sweep
+
+# `inputs` is a list of examples (or a batched tensor); `labels` is one per example.
+probe, summary = train_probe(lens, "transformer.h.6", inputs, labels)
+print(f"test acc {summary['test_accuracy']:.2f} (baseline {summary['baseline']:.2f})")
+
+# Sweep every layer to find where the concept is most decodable.
+sweep = probe_sweep(lens, inputs, labels)
+print(f"best layer: {sweep['best_layer']} ({sweep['best_accuracy']:.2f})")
+
+# Apply a trained probe to new inputs (inference lives on the lens).
+preds = lens.apply_probe(new_inputs, probe, "transformer.h.6")
+print(preds["predictions"])
+```
+
+> **Probing is correlational, not causal.** High probe accuracy means a concept is *decodable* from a layer, not that the model *uses* it — a linear probe can find a direction that merely correlates with your labels. For a mechanistic claim, treat the probe as a hypothesis and confirm it causally: patch or ablate the direction with `activation_patch` and check the behavior changes.
+
 ## Supported Architectures
 
 | Architecture | Adapter | Analyses |
