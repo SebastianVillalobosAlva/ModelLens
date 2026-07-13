@@ -105,6 +105,133 @@ def run_activation_patching(
     }
 
 
+def run_attribution_patching(
+    lens,
+    clean_input,
+    corrupted_input,
+    layer_names: Optional[List[str]] = None,
+    metric_fn: Optional[Callable] = None,
+    **kwargs,
+) -> Dict:
+    """
+    Attribution patching: a first-order (gradient) approximation of activation
+    patching.
+
+    Instead of one forward pass per layer, it estimates every sublayer's effect
+    from ~2 forward passes + 1 backward pass, using the linear approximation
+
+        effect ≈ (a_corrupt - a_clean) · ∂metric/∂a_clean
+
+    evaluated at the clean activation. This is *exact* when the network and
+    metric are linear, and a Taylor approximation otherwise (Nanda 2023; Syed
+    et al. 2023, "Attribution Patching Outperforms Automated Circuit Discovery").
+
+    Returns the same schema as run_activation_patching (clean_metric,
+    corrupted_metric, total_effect, patch_effects with effect / normalized_effect
+    / patched_metric), so it is a drop-in backend for circuit discovery.
+
+    Note: unlike run_activation_patching, `metric_fn` here must return a scalar
+    *tensor* (differentiable), not a float. The default handles this.
+
+    Args:
+        lens: ModelLens instance
+        clean_input: Input producing the "correct" behavior
+        corrupted_input: Modified input producing different behavior
+        layer_names: Sublayers to attribute. If None, uses get_patchable_layers().
+        metric_fn: Differentiable metric(output) -> scalar tensor.
+
+    Returns:
+        Dict of attribution effects per layer.
+    """
+    if metric_fn is None:
+        metric_fn = _default_metric_tensor
+
+    model = lens.model
+    available = dict(model.named_modules())
+
+    clean_len = _get_seq_length(clean_input)
+    corrupted_len = _get_seq_length(corrupted_input)
+    if clean_len and corrupted_len and clean_len != corrupted_len:
+        raise ValueError(
+            f"Clean ({clean_len}) and corrupted ({corrupted_len}) inputs "
+            f"must have the same token length."
+        )
+
+    if layer_names is None:
+        layer_names = lens.adapter.get_patchable_layers()
+    assert layer_names is not None, "No patchable layers found."
+
+    # Corrupted activations (no grad, detached) — reuse the existing capture.
+    corrupted_activations, corrupted_output = _capture_activations(
+        model, available, corrupted_input, layer_names, **kwargs
+    )
+    corrupted_metric = float(metric_fn(corrupted_output))
+
+    # Clean forward WITH grad; retain grad on each captured activation.
+    clean_activations: Dict[str, torch.Tensor] = {}
+    with _hook_context() as hooks:
+        for name in layer_names:
+            hook = available[name].register_forward_hook(
+                _make_grad_hook(name, clean_activations)
+            )
+            hooks.append(hook)
+        model.zero_grad(set_to_none=True)
+        clean_output = _forward(model, clean_input, **kwargs)
+
+    metric = metric_fn(clean_output)
+    if not isinstance(metric, torch.Tensor) or metric.dim() != 0:
+        raise ValueError(
+            "attribution patching metric_fn must return a scalar tensor."
+        )
+    if not metric.requires_grad:
+        raise ValueError(
+            "attribution patching needs a grad-enabled model; the metric does "
+            "not require grad (are the model's parameters frozen?)."
+        )
+    metric.backward()
+    clean_metric = float(metric.detach())
+
+    total_effect = corrupted_metric - clean_metric
+    patch_effects = {}
+    for name in layer_names:
+        a_clean = clean_activations.get(name)
+        a_corrupt = corrupted_activations.get(name)
+        if a_clean is None or a_corrupt is None or a_clean.grad is None:
+            attribution = 0.0
+        else:
+            attribution = float(
+                ((a_corrupt - a_clean.detach()) * a_clean.grad).sum()
+            )
+        patch_effects[name] = {
+            "attribution": attribution,
+            "effect": attribution,
+            "patched_metric": clean_metric + attribution,
+            "normalized_effect": attribution / (total_effect + 1e-10),
+        }
+
+    model.zero_grad(set_to_none=True)
+
+    return {
+        "clean_metric": clean_metric,
+        "corrupted_metric": corrupted_metric,
+        "total_effect": total_effect,
+        "patch_effects": patch_effects,
+        "method": "attribution",
+    }
+
+
+def _make_grad_hook(name, store):
+    """Forward hook that keeps the module's output tensor and retains its grad."""
+
+    def hook_fn(module, inputs, output):
+        t = output[0] if isinstance(output, tuple) else output
+        if isinstance(t, torch.Tensor) and t.is_floating_point() and t.requires_grad:
+            t.retain_grad()
+            store[name] = t
+
+    return hook_fn
+
+
 def _capture_activations(model, available, inputs, layer_names, **kwargs):
     """Capture activations at specified layers during a forward pass."""
     activations = {}
@@ -184,11 +311,20 @@ def _get_sublayers(model) -> List[str]:
     return sublayers
 
 
+def _default_metric_tensor(output) -> torch.Tensor:
+    """
+    Differentiable default metric: the max logit at the last token position,
+    returned as a scalar tensor so it can be back-propagated (attribution
+    patching).
+    """
+    if hasattr(output, "logits"):
+        output = output.logits
+    return output[:, -1, :].max(dim=-1).values.mean()
+
+
 def _default_metric(output) -> float:
     """
     Default metric: return the max logit value at the last token position.
     Useful for language models where we care about the predicted next token.
     """
-    if hasattr(output, "logits"):
-        output = output.logits
-    return output[:, -1, :].max(dim=-1).values.mean().item()
+    return _default_metric_tensor(output).item()

@@ -166,6 +166,28 @@ class ModelLens:
             self, clean_input, corrupted_input, layer_names, **kwargs
         )
 
+    def attribution_patch(
+        self, clean_input, corrupted_input, layer_names=None, **kwargs
+    ):
+        """
+        Gradient-based approximation of activation_patch: estimates every
+        sublayer's causal effect in ~2 forward passes + 1 backward pass, instead
+        of one forward pass per layer. Same return schema as activation_patch.
+
+        Available for all architectures. Any custom metric_fn must return a
+        scalar *tensor* (differentiable), not a float.
+        """
+        self.adapter.require(
+            AnalysisCapability.ACTIVATION_PATCHING, "attribution_patch"
+        )
+        from modellens.analysis.activation_patching import run_attribution_patching
+
+        if layer_names is None:
+            layer_names = self.adapter.get_patchable_layers()
+        return run_attribution_patching(
+            self, clean_input, corrupted_input, layer_names, **kwargs
+        )
+
     # -- Projection-based analyses --
 
     def layer_probe(self, inputs, **kwargs):
