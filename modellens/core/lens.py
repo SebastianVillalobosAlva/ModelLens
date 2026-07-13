@@ -312,6 +312,21 @@ class ModelLens:
 
         return _feature_directions(self, **kwargs)
 
+    # -- Concept probing --
+
+    def apply_probe(self, inputs, probe, layer_name, **kwargs):
+        """
+        Run inputs through a trained linear concept probe at a layer and return
+        per-input predictions and class probabilities.
+
+        Train the probe first with the module-level
+        modellens.analysis.probing.train_probe(lens, layer_name, inputs, labels).
+        """
+        self.adapter.require(AnalysisCapability.HOOKS, "apply_probe")
+        from modellens.analysis.probing import apply_probe as _apply_probe
+
+        return _apply_probe(self, inputs, probe, layer_name, **kwargs)
+
     # ---- Cleanup ----
 
     def clear(self) -> None:
