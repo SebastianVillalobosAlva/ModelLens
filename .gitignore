@@ -14,6 +14,12 @@ env/
 .venv/
 .env/
 
+# R session artifacts
+.Rhistory
+
+# Local-only context for Claude Code (contains personal application-strategy notes)
+CLAUDE.md
+
 # IDE
 .vscode/
 .idea/
