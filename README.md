@@ -330,3 +330,5 @@ pytest tests/ -v
 ## License
 
 MIT
+
+_ModelLens began as a transformer-only interpretability project for Georgetown DSAN 6600 (with Vinny, Sharanya, Jeff, Fareeza). The architecture-agnostic redesign — adapter layer, CNN/RNN analyses, circuit discovery, sparse autoencoders, and MCP server — is my own work._
