@@ -4,7 +4,7 @@ setup(
     name="modellens",
     version="0.1.0",
     description="An open-source interpretability toolkit for PyTorch neural networks",
-    author="6600 Neural Networks - Sebastian/Vinny/Fareeza/Sharanya/Jeff",
+    author="Sebastian Villalobos",
     packages=find_packages(),
     python_requires=">=3.10",
     install_requires=[
