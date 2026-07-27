@@ -10,7 +10,7 @@ Unlike tools like [TransformerLens](https://github.com/TransformerLensOrg/Transf
 
 ModelLens is architecture-agnostic, but its sharpest use is **causal**: given two versions of a model, did an intervention actually *rewire the circuit* behind a behavior, or just change the output? Better still — can the circuit picture *predict* which intervention will work before you measure the behavior?
 
-This is the flagship result from the companion [Stoic-Steering](https://github.com/SebastianVillalobosAlva/Stoic-Steering) project (Exp 12), which steers Llama-3.2-3B toward Stoic philosophy two ways — Contrastive Activation Addition (CAA) and LoRA fine-tuning — and uses ModelLens's `discover_circuit` to compare what each does *mechanistically*.
+This is the flagship result from the companion [Stoic-Steering](https://github.com/SebastianVillalobosAlva/Stoic-Steering) project, which compares two ways of installing a behavior in Llama-3.2-3B: Contrastive Activation Addition (CAA) and LoRA fine-tuning, using Stoic corpora to build the behavioral axis. ModelLens's `discover_circuit` does the mechanistic comparison.
 
 ```python
 from modellens import ModelLens
@@ -33,10 +33,13 @@ circuit_lora = lens_lora.discover_circuit(clean, corrupted)
 
 **Finding.** Comparing the discovered circuits:
 
-- **CAA at the canonical coefficient is a circuit-level no-op** — the steered model's circuit is essentially the base model's. Adding a steering vector at one layer changes activations without rewiring the causal pathway.
-- **LoRA is the largest circuit modifier** — the fine-tuned model routes the behavior through a measurably different set of components, largest for Seneca.
+- **CAA at the canonical coefficient does nothing to the circuit** — the steered model's circuit is essentially the base model's. Adding a steering vector at one layer changes activations without rewiring the causal pathway.
 
-The payoff is that this **circuit split predicted the behavior before it was measured**: on a judge-free forced-choice decision probe, CAA moved nothing at any depth (its earlier apparent effects turned out to be a decoding-measurement artifact), while LoRA moved the decision (Seneca ΔP(stoic) +0.061). Two interventions people treat as interchangeable operate through **different internal mechanisms** — exactly the kind of claim ModelLens exists to make. Full write-up in the [Stoic-Steering README](https://github.com/SebastianVillalobosAlva/Stoic-Steering), which names ModelLens as its companion interpretability toolkit.
+- **LoRA rewires it**. The fine-tuned model routes the behavior through a measurably different set of components: clean logit diff shifts by up to 1.43 and the circuit drops up to 7 of 22 nodes, largest for Seneca.
+
+The payoff is that this circuit split predicted the behavior before it was measured. On a judge-free forced-choice decision probe, CAA moved nothing at any depth — its earlier apparent effects were a decoding-measurement artifact — while LoRA moved the decision (Seneca ΔP(stoic) +0.061). Two interventions people treat as interchangeable, and only one of them does anything, mechanically or behaviorally. That's the kind of claim ModelLens exists to make.
+
+This is a pilot rather than a settled result (n=2 items); a stance-balanced sweep is the next step. Full write-up in the [Stoic-Steering README](https://github.com/SebastianVillalobosAlva/Stoic-Steering).
 
 > **New to ModelLens?** See [How It Works](#how-it-works) below for the one-liner API (`ModelLens(model)`) and per-architecture examples.
 
