@@ -18,6 +18,7 @@ _ARCHITECTURE_PATTERNS = {
     "phi": ("model.layers.{i}", "self_attn", "mlp"),
     "phi3": ("model.layers.{i}", "self_attn", "mlp"),
     "qwen2": ("model.layers.{i}", "self_attn", "mlp"),
+    "qwen3": ("model.layers.{i}", "self_attn", "mlp"),
     "stablelm": ("model.layers.{i}", "self_attn", "mlp"),
     "cohere": ("model.layers.{i}", "self_attn", "mlp"),
     # BERT family
@@ -117,8 +118,7 @@ class HuggingFaceAdapter(BaseAdapter):
                 layers.append(f"{block}.{attn_suffix}")
                 layers.append(f"{block}.{mlp_suffix}")
             # Verify they actually exist in the model
-            available = set(dict(self.model.named_modules()).keys())
-            return [l for l in layers if l in available]
+            return self._existing_layers(layers)
 
         # Fallback: name-based search
         return self._find_by_keywords(
@@ -162,8 +162,7 @@ class HuggingFaceAdapter(BaseAdapter):
                 f"{block_pat.format(i=i)}.{attn_suffix}"
                 for i in range(self._num_layers)
             ]
-            available = set(dict(self.model.named_modules()).keys())
-            return [l for l in layers if l in available]
+            return self._existing_layers(layers)
 
         # Fallback
         return self._find_by_keywords(["attn", "attention", "self_attn"])
@@ -207,8 +206,7 @@ class HuggingFaceAdapter(BaseAdapter):
         if self._pattern and self._num_layers:
             block_pat = self._pattern[0]
             layers = [block_pat.format(i=i) for i in range(self._num_layers)]
-            available = set(dict(self.model.named_modules()).keys())
-            return [l for l in layers if l in available]
+            return self._existing_layers(layers)
 
         # Fallback: find numbered block patterns
         import re
@@ -220,6 +218,27 @@ class HuggingFaceAdapter(BaseAdapter):
         return blocks
 
     # ---- Private Helpers ----
+
+    def _existing_layers(self, layers: List[str]) -> List[str]:
+        """
+        Keep the config-derived layer names that exist in the model.
+
+        Raises if none exist. For a known architecture that means the module
+        names are not where the config says they are, almost always because the
+        model is wrapped (a PEFT model prefixes every name with
+        "base_model.model."). Returning an empty list here used to let every
+        analysis run silently on zero layers.
+        """
+        available = set(dict(self.model.named_modules()).keys())
+        found = [l for l in layers if l in available]
+        if layers and not found:
+            raise ValueError(
+                f"None of the expected '{self._model_type}' layers (for example "
+                f"'{layers[0]}') exist in this model. If it is a PEFT/LoRA model, "
+                "merge the adapter first with model.merge_and_unload(), or pass "
+                "the underlying model."
+            )
+        return found
 
     def _find_by_keywords(self, keywords: List[str]) -> List[str]:
         """Find layers whose names contain any of the given keywords."""
